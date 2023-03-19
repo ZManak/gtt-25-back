@@ -1,76 +1,75 @@
-/* const firebase = require('firebase/app');
-const firestore = require('firebase/firestore');
-const storage = require('firebase/storage'); */
 require('dotenv').config();
-require('firebase/firestore');
 const express = require('express');
 const AdminJS = require('adminjs');
 const AdminJSExpress = require('@adminjs/express');
-const database = require('@adminjs/firebase').default;
-require('@adminjs/firebase/build/resource-type/firestore')
-require('@adminjs/firebase/build/database-type/firestore')
-const firebase = require('firebase');
-
-
-
-const firebaseConfig = {
-    apiKey: process.env.API_KEY,
-    authDomain: process.env.AUTH_DOMAIN,
-    projectId: process.env.PROJECT_ID,
-    storageBucket: process.env.STORAGE_BUCKET,
-    messagingSenderId: process.env.MESSAGING_SENDER_ID,
-    appId: process.env.APP_ID,
-    measurementId: process.env.MEASUREMENR_ID
-};
-  
-firebase.initializeApp(firebaseConfig);
-  
+const AdminJSMongoose = require('@adminjs/mongoose');
+const mongoose = require('./utils/mongoDB');
+const MongoStore = require('connect-mongo');
+const morgan = require('morgan');
+const session = require('express-session');
 
 const PORT = 3000;
 const app = express();
 
+app.use(morgan('dev'));
+
+const DEFAULT_ADMIN = {
+  email: 'admin@gtt.com',
+  password: 'superUser',
+};
+
+const authenticate = async (email, password) => {
+  if (email === DEFAULT_ADMIN.email && password === DEFAULT_ADMIN.password) {
+    return Promise.resolve(DEFAULT_ADMIN);
+  }
+  return null;
+};
 
 const start = async () => {
-    
-    const app = express()
-  
-    const admin = new AdminJS({})
-  
-    const adminRouter = AdminJSExpress.buildRouter(admin)
-    app.use(admin.options.rootPath, adminRouter)
-  
-    app.listen(PORT, () => {
-      console.log(`AdminJS started on http://localhost:${PORT}${admin.options.rootPath}`)
-    })
-}
-  
-AdminJS.registerAdapter(database);
-  
+  const app = express();
 
-const setupAdmin = async expressApp => {
-  
-  const adminJS = new AdminJS({
-    branding: {
-      articleTitle: 'Firebase example',
+  const admin = new AdminJS({});
+
+  const sessionStore = app.use(
+    session({
+      secret: 'sessionsecret',
+      resave: true,
+      saveUninitialized: true,
+      store: MongoStore.create({
+        mongoUrl: process.env.DATABASE_URL,
+        ttl: 60 * 60 * 24,
+        autoRemove: 'native',
+      }),
+    })
+  );
+
+  const adminRouter = AdminJSExpress.buildAuthenticatedRouter(
+    admin,
+    {
+      authenticate,
+      cookieName: 'adminjs',
+      cookiePassword: 'sessionsecret',
     },
-    resources: [
-      {
-        collection: firebase.firestore().collection('Articles'),
-        schema: {
-          title: 'string',
-          content: 'string',
-          published: 'boolean',
-          createdAt: 'date',
-          updatedAt: 'date',
-          image: {
-            type: 'url',
-          },
-        },
-      }
-    ]
-  })
-  const router = await AdminJSExpress.buildRouter(adminJS);
-  app.use(AdminJS.options.rootPath, router);
-}
+    null,
+    {
+      store: sessionStore,
+      resave: true,
+      saveUninitialized: true,
+      secret: 'sessionsecret',
+      cookie: {
+        httpOnly: process.env.NODE_ENV === 'production',
+        secure: process.env.NODE_ENV === 'production',
+      },
+      name: 'adminjs',
+    }
+  );
+  app.use(admin.options.rootPath, adminRouter);
+
+  app.listen(PORT, () => {
+    console.log(
+      `AdminJS started on http://localhost:${PORT}${admin.options.rootPath}`
+    );
+  });
+};
+
 start();
-setupAdmin(app);
